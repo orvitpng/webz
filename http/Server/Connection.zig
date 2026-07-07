@@ -1,14 +1,16 @@
 const http = @import("../root.zig");
 const std = @import("std");
 
-const Stream = @import("Stream.zig");
+const Socket = @import("Socket/root.zig");
+const This = @This();
 
-address: *const std.Io.net.IpAddress,
-stream: *Stream,
+addr: *const std.Io.net.IpAddress,
+socket: *const Socket,
+reader: *std.Io.Reader,
 
-pub fn handle(self: @This(), buffer: []u8) !void {
+pub fn handle(self: *This, buf: []u8) !void {
     _ = self;
-    _ = buffer;
+    _ = buf;
 
     return error.Foo;
 }

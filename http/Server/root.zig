@@ -1,15 +1,17 @@
 const http = @import("../root.zig");
 const std = @import("std");
 
-const Stream = @import("Stream.zig");
+const Connection = @import("Connection.zig");
+const Socket = @import("Socket/root.zig");
 const This = @This();
-
-pub const Connection = @import("Connection.zig");
 
 server: std.Io.net.Server,
 group: std.Io.Group = .init,
 // TODO: with maturity, determine if this is needed
 stopping: std.atomic.Value(bool) = .init(false),
+
+// TODO: this should be configurable
+const BUF_SIZE = 4096;
 
 pub fn listen(io: std.Io, address: std.Io.net.IpAddress) !This {
     return .{ .server = try address.listen(io, .{ .reuse_address = true }) };
@@ -22,9 +24,8 @@ pub fn start(self: *This, io: std.Io) !void {
                 self.stopping.load(.monotonic))
             {} else err;
         try self.group.concurrent(io, connect, .{
-            io,
             stream.socket.address,
-            stream.socket.handle,
+            .{ .io = io, .handle = stream.socket.handle },
         });
     }
 }
@@ -36,40 +37,50 @@ pub fn stop(self: *This, io: std.Io) void {
 }
 
 fn connect(
-    io: std.Io,
     addr: std.Io.net.IpAddress,
-    handle: std.Io.net.Socket.Handle,
+    socket: Socket,
 ) std.Io.Cancelable!void {
-    var stream: Stream = .{ .handle = handle };
-    defer stream.close(io);
+    defer socket.close();
 
-    const conn: Connection = .{
-        .address = &addr,
-        .stream = &stream,
+    var buf: [BUF_SIZE * 2]u8 = undefined;
+    var reader = socket.reader(buf[0..BUF_SIZE]);
+
+    var conn = Connection{
+        .addr = &addr,
+        .reader = &reader.face,
+        .socket = &socket,
     };
 
-    // TODO: I kind of hate this
-    var buf: [4096]u8 = undefined;
-    conn.handle(&buf) catch |err| {
-        const status: http.Status = switch (err) {
-            // error.Canceled => return err,
-            else => blk: {
-                std.log.err("handle: {s}", .{@errorName(err)});
-                break :blk .server_error;
-            },
-        };
+    conn.handle(buf[BUF_SIZE..]) catch |err| {
+        const status: http.Status =
+            switch (get_err(&reader, err)) {
+                error.Canceled => return error.Canceled,
+                else => blk: {
+                    std.log.err("handle: {s}", .{@errorName(err)});
+                    break :blk .server_error;
+                },
+            };
 
-        _ = std.fmt.printInt(&buf, @intFromEnum(status), 10, .lower, .{});
-        buf[3] = ' ';
-
-        stream.write_vec(io, &.{
-            "HTTP/1.1 ",
-            buf[0..4],
+        const head = std.fmt.bufPrint(
+            &buf,
+            "HTTP/1.1 {d} ",
+            .{@intFromEnum(status)},
+        ) catch unreachable;
+        socket.write_vec_all(&.{
+            head,
             status.string(),
             "\r\n\r\n",
         }) catch return;
     };
 
-    stream.shutdown(io, .send) catch return;
-    stream.discard(io, &buf) catch return;
+    socket.shutdown(.send) catch return;
+    // TODO; this should have a timeout
+    socket.discard_all(&buf) catch return;
+}
+
+fn get_err(reader: *const Socket.Reader, err: anyerror) anyerror {
+    return switch (err) {
+        error.ReadFailed => get_err(reader, reader.err.?),
+        else => return err,
+    };
 }

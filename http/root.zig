@@ -95,7 +95,7 @@ pub const Method = enum {
 };
 
 // https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
-pub const Status = enum(u9) {
+pub const Status = enum(u10) {
     @"continue" = 100,
     switching_protocols = 101,
     processing = 102,
@@ -163,6 +163,8 @@ pub const Status = enum(u9) {
     loop_detected = 508,
     not_extended = 510, // obsoleted
     network_auth_required = 511,
+
+    _,
 
     pub fn string(self: Status) []const u8 {
         return switch (self) {
@@ -232,6 +234,8 @@ pub const Status = enum(u9) {
             .loop_detected => "Loop Detected",
             .not_extended => "Not Extended",
             .network_auth_required => "Network Authentication Required",
+
+            else => "Unknown",
         };
     }
 };
