@@ -2,6 +2,22 @@ const std = @import("std");
 
 pub const Server = @import("Server/root.zig");
 
+pub const Version = enum {
+    const map = std.StaticStringMap(Version).initComptime(.{
+        .{ "HTTP/1.0", .@"1.0" },
+        .{ "HTTP/1.1", .@"1.1" },
+    });
+
+    pub const max_len = map.max_len;
+
+    @"1.0",
+    @"1.1",
+
+    pub fn from(str: []const u8) ?Version {
+        return map.get(str);
+    }
+};
+
 // TODO: I feel like this (and Status) can be done better and/or cleaner
 // https://www.iana.org/assignments/http-methods/http-methods.xhtml
 pub const Method = enum {
@@ -47,6 +63,8 @@ pub const Method = enum {
         .{ "REBIND", .rebind },
         .{ "SEARCH", .search },
     });
+
+    pub const max_len = map.max_len;
 
     get,
     head,

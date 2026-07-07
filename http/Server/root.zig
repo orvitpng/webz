@@ -7,7 +7,6 @@ const This = @This();
 
 server: std.Io.net.Server,
 group: std.Io.Group = .init,
-// TODO: with maturity, determine if this is needed
 stopping: std.atomic.Value(bool) = .init(false),
 
 // TODO: this should be configurable
@@ -17,13 +16,14 @@ pub fn listen(io: std.Io, address: std.Io.net.IpAddress) !This {
     return .{ .server = try address.listen(io, .{ .reuse_address = true }) };
 }
 
-pub fn start(self: *This, io: std.Io) !void {
+pub fn start(self: *This, alloc: std.mem.Allocator, io: std.Io) !void {
     while (true) {
         const stream = self.server.accept(io) catch |err|
             return if (err == error.SocketNotListening and
                 self.stopping.load(.monotonic))
             {} else err;
-        try self.group.concurrent(io, connect, .{
+        try self.group.concurrent(io, handle, .{
+            alloc,
             stream.socket.address,
             .{ .io = io, .handle = stream.socket.handle },
         });
@@ -36,7 +36,8 @@ pub fn stop(self: *This, io: std.Io) void {
     self.group.cancel(io);
 }
 
-fn connect(
+fn handle(
+    alloc: std.mem.Allocator,
     addr: std.Io.net.IpAddress,
     socket: Socket,
 ) std.Io.Cancelable!void {
@@ -44,17 +45,25 @@ fn connect(
 
     var buf: [BUF_SIZE * 2]u8 = undefined;
     var reader = socket.reader(buf[0..BUF_SIZE]);
-
     var conn = Connection{
         .addr = &addr,
         .reader = &reader.face,
         .socket = &socket,
     };
 
-    conn.handle(buf[BUF_SIZE..]) catch |err| {
+    conn.handle(alloc, buf[BUF_SIZE..]) catch |err| {
         const status: http.Status =
             switch (get_err(&reader, err)) {
+                error.Malformed,
+                error.UnknownMethod,
+                error.StreamTooLong,
+                => .bad_request,
+                error.UriTooLong => .uri_too_long,
+                error.UnknownVersion => .version_not_supported,
+
                 error.Canceled => return error.Canceled,
+                error.EndOfStream => return,
+
                 else => blk: {
                     std.log.err("handle: {s}", .{@errorName(err)});
                     break :blk .server_error;

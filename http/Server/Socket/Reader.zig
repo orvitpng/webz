@@ -22,11 +22,15 @@ pub fn stream(
 
 pub fn read_vec(reader: *std.Io.Reader, data: [][]u8) std.Io.Reader.Error!usize {
     const self: *This = @fieldParentPtr("face", reader);
-    const n = self.socket.read_vec(data) catch |err| {
+
+    var buf: [1][]u8 = .{reader.buffer[reader.end..]};
+    const vec = if (data[0].len == 0) &buf else data;
+    const n = self.socket.read_vec(vec) catch |err| {
         self.err = err;
         return error.ReadFailed;
     };
 
     if (n == 0) return error.EndOfStream;
+    if (data[0].len == 0) reader.end += n;
     return n;
 }
