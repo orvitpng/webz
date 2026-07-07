@@ -1,0 +1,10 @@
+.{
+    .name = .webz,
+    .fingerprint = 0x7eabdff5cca738a5,
+
+    .version = "0.0.0",
+    .paths = .{
+        "http/",
+        "build.zig",
+    },
+}
