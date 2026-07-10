@@ -1,5 +1,6 @@
 const std = @import("std");
 
+pub const Request = @import("Request.zig");
 pub const Server = @import("Server/root.zig");
 
 pub const Version = enum {

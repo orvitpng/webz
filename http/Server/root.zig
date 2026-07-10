@@ -7,7 +7,6 @@ const This = @This();
 
 server: std.Io.net.Server,
 group: std.Io.Group = .init,
-stopping: std.atomic.Value(bool) = .init(false),
 
 // TODO: this should be configurable
 const BUF_SIZE = 4096;
@@ -19,9 +18,7 @@ pub fn listen(io: std.Io, address: std.Io.net.IpAddress) !This {
 pub fn start(self: *This, alloc: std.mem.Allocator, io: std.Io) !void {
     while (true) {
         const stream = self.server.accept(io) catch |err|
-            return if (err == error.SocketNotListening and
-                self.stopping.load(.monotonic))
-            {} else err;
+            return if (err == error.SocketNotListening) {} else err;
         try self.group.concurrent(io, handle, .{
             alloc,
             stream.socket.address,
@@ -31,7 +28,6 @@ pub fn start(self: *This, alloc: std.mem.Allocator, io: std.Io) !void {
 }
 
 pub fn stop(self: *This, io: std.Io) void {
-    self.stopping.store(true, .monotonic);
     self.server.deinit(io);
     self.group.cancel(io);
 }
@@ -43,21 +39,21 @@ fn handle(
 ) std.Io.Cancelable!void {
     defer socket.close();
 
-    var buf: [BUF_SIZE * 2]u8 = undefined;
-    var reader = socket.reader(buf[0..BUF_SIZE]);
+    var buf: [BUF_SIZE]u8 = undefined;
+    var reader = socket.reader(&buf);
     var conn = Connection{
         .addr = &addr,
         .reader = &reader.face,
         .socket = &socket,
     };
 
-    conn.handle(alloc, buf[BUF_SIZE..]) catch |err| {
+    conn.start(alloc) catch |err| {
         const status: http.Status =
             switch (get_err(&reader, err)) {
                 error.Malformed,
-                error.UnknownMethod,
                 error.StreamTooLong,
                 => .bad_request,
+                error.UnknownMethod => .not_implemented,
                 error.UriTooLong => .uri_too_long,
                 error.UnknownVersion => .version_not_supported,
 
@@ -83,13 +79,13 @@ fn handle(
     };
 
     socket.shutdown(.send) catch return;
-    // TODO; this should have a timeout
+    // TODO: this should have a timeout
     socket.discard_all(&buf) catch return;
 }
 
 fn get_err(reader: *const Socket.Reader, err: anyerror) anyerror {
     return switch (err) {
-        error.ReadFailed => get_err(reader, reader.err.?),
+        error.ReadFailed => reader.err.?,
         else => return err,
     };
 }
